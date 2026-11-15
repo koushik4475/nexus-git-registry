@@ -1,4 +1,7 @@
-# Nexus Git-Native Artifact Registry ⚡📦
+# Nexus Git Registry | Go OCI Artifact Registry with Git-Native Storage
+
+Nexus Git Registry is a Go-based container and artifact registry project that combines OCI image workflows with Git-backed storage and metadata. The README documents a registry service that can be used with familiar Docker commands to push, pull, and inspect images while exploring content-addressed versioning and signed artifacts. It is relevant to platform engineers researching artifact distribution, OCI registries, and Git-native infrastructure.
+
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/ER-brocode/nexus-git-registry/main/assets/nexus-banner.svg" alt="Nexus Registry Banner" width="100%" />
