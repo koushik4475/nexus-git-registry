@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ER-brocode/nexus-git-registry/pkg/oci"
 	"github.com/ER-brocode/nexus-git-registry/pkg/proxy"
@@ -343,5 +344,35 @@ func TestTokenAuthentication(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK with bearer token, got %d", rec.Code)
+	}
+}
+
+func TestTokenEndpointUsesCurrentIssuedAt(t *testing.T) {
+	server, teardown := setupTestServer(t)
+	defer teardown()
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/token", nil)
+	req.SetBasicAuth("koushik4475", "nexus-secret-token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from token endpoint, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		IssuedAt string `json:"issued_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode token response: %v", err)
+	}
+
+	issuedAt, err := time.Parse(time.RFC3339, response.IssuedAt)
+	if err != nil {
+		t.Fatalf("issued_at must be a valid RFC3339 timestamp, got %q: %v", response.IssuedAt, err)
+	}
+
+	if delta := time.Since(issuedAt); delta < 0 || delta > time.Minute {
+		t.Fatalf("issued_at should reflect the current time, got %s (delta %s)", issuedAt, delta)
 	}
 }
