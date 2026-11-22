@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ER-brocode/nexus-git-registry/pkg/gitstorage"
 	"github.com/ER-brocode/nexus-git-registry/pkg/oci"
@@ -429,5 +430,5 @@ func (s *Server) writeError(w http.ResponseWriter, status int, code, message str
 }
 
 func timeNowISO() string {
-	return "2026-10-18T00:00:00Z"
+	return time.Now().UTC().Format(time.RFC3339)
 }
