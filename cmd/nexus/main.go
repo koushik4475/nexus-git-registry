@@ -21,6 +21,7 @@ func main() {
 	gitDir := flag.String("git-dir", "./data/git-meta", "Directory for Git-native manifest tree")
 	peers := flag.String("peers", "", "Comma-separated list of peer container cache endpoints")
 	realm := flag.String("auth-realm", "http://localhost:5000/v2/token", "Authentication realm endpoint")
+	requireAuth := flag.Bool("require-auth", false, "Require authentication for registry operations")
 	flag.Parse()
 
 	log.Printf("----------------------------------------------------------------")
@@ -38,12 +39,22 @@ func main() {
 		GitDir:   *gitDir,
 		Realm:    *realm,
 		Service:  "nexus-git-registry",
-		P2PPeers: peerList,
+		P2PPeers:    peerList,
+		RequireAuth: *requireAuth,
 	}
 
 	server, err := proxy.NewServer(cfg)
 	if err != nil {
 		log.Fatalf("Fatal: failed to initialize Nexus engine: %v", err)
+	}
+
+	if *requireAuth {
+		username := os.Getenv("NEXUS_ADMIN_USERNAME")
+		password := os.Getenv("NEXUS_ADMIN_PASSWORD")
+		if username == "" || password == "" {
+			log.Fatal("NEXUS_ADMIN_USERNAME and NEXUS_ADMIN_PASSWORD must be set when -require-auth is enabled")
+		}
+		server.Authenticator().AddUser(username, password)
 	}
 
 	httpServer := &http.Server{

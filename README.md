@@ -150,6 +150,18 @@ ok      github.com/ER-brocode/nexus-git-registry/tests  21.070s
 
 ---
 
+## Authentication
+
+Authentication is disabled by default for local development. To require authentication for registry operations, start the server with the -require-auth flag and configure an administrator using environment variables:
+
+```bash
+export NEXUS_ADMIN_USERNAME="your-admin-user"
+export NEXUS_ADMIN_PASSWORD="your-strong-password"
+./bin/nexus -require-auth
+```
+
+When -require-auth is enabled, the server refuses to start unless both variables are set. No default or built-in user credentials are created. Keep these values in your deployment secret manager and never commit them to source control. The /v2/ version check remains public for OCI client discovery; token exchange uses the configured Basic-auth credentials.
+
 ## 🛡️ License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
