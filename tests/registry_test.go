@@ -44,6 +44,7 @@ func setupTestServerWithAuth(t *testing.T, requireAuth bool) (*proxy.Server, fun
 		os.RemoveAll(tmpDir)
 		t.Fatalf("failed to instantiate server: %v", err)
 	}
+	server.Authenticator().AddUser("test-user", "test-password")
 
 	teardown := func() {
 		os.RemoveAll(tmpDir)
@@ -356,7 +357,7 @@ func TestTokenEndpointUsesCurrentIssuedAt(t *testing.T) {
 	defer teardown()
 
 	req := httptest.NewRequest(http.MethodGet, "/v2/token", nil)
-	req.SetBasicAuth("koushik4475", "nexus-secret-token")
+	req.SetBasicAuth("test-user", "test-password")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 

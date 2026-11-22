@@ -61,9 +61,6 @@ func NewAuthenticator(realm, service string) *Authenticator {
 		tokenExpiry: 2 * time.Hour,
 	}
 
-	// Register default test & admin credentials
-	auth.AddUser("koushik4475", "nexus-secret-token")
-	auth.AddUser("ci-runner", "ci-build-pass")
 	return auth
 }
 
