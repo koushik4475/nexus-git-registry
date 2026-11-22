@@ -18,6 +18,10 @@ import (
 )
 
 func setupTestServer(t *testing.T) (*proxy.Server, func()) {
+	return setupTestServerWithAuth(t, false)
+}
+
+func setupTestServerWithAuth(t *testing.T, requireAuth bool) (*proxy.Server, func()) {
 	tmpDir, err := os.MkdirTemp("", "nexus-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -32,7 +36,7 @@ func setupTestServer(t *testing.T) (*proxy.Server, func()) {
 		Realm:       "http://localhost:5000/v2/token",
 		Service:     "nexus-git-registry",
 		P2PPeers:    []string{"10.0.0.1:5000", "10.0.0.2:5000"},
-		RequireAuth: false,
+		RequireAuth: requireAuth,
 	}
 
 	server, err := proxy.NewServer(cfg)
@@ -374,5 +378,62 @@ func TestTokenEndpointUsesCurrentIssuedAt(t *testing.T) {
 
 	if delta := time.Since(issuedAt); delta < 0 || delta > time.Minute {
 		t.Fatalf("issued_at should reflect the current time, got %s (delta %s)", issuedAt, delta)
+	}
+}
+
+
+func TestRequireAuthRejectsAnonymousRepositoryRequests(t *testing.T) {
+	server, teardown := setupTestServerWithAuth(t, true)
+	defer teardown()
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/library/alpine/tags/list", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected anonymous request to be rejected with 401, got %d", rec.Code)
+	}
+	if rec.Header().Get("Www-Authenticate") == "" {
+		t.Fatal("expected an OCI Bearer authentication challenge")
+	}
+}
+
+func TestRequireAuthEnforcesRepositoryActionScopes(t *testing.T) {
+	server, teardown := setupTestServerWithAuth(t, true)
+	defer teardown()
+
+	token, err := server.Authenticator().IssueToken("reader", []proxy.ResourceAccess{
+		{Type: "repository", Name: "library/alpine", Actions: []string{"pull"}},
+	})
+	if err != nil {
+		t.Fatalf("failed to issue scoped token: %v", err)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/v2/library/alpine/tags/list", nil)
+	readReq.Header.Set("Authorization", "Bearer "+token)
+	readRec := httptest.NewRecorder()
+	server.ServeHTTP(readRec, readReq)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("expected scoped pull request to succeed, got %d: %s", readRec.Code, readRec.Body.String())
+	}
+
+	writeReq := httptest.NewRequest(http.MethodPost, "/v2/library/alpine/blobs/uploads/", nil)
+	writeReq.Header.Set("Authorization", "Bearer "+token)
+	writeRec := httptest.NewRecorder()
+	server.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusForbidden {
+		t.Fatalf("expected pull-only token to be denied push access with 403, got %d", writeRec.Code)
+	}
+}
+
+func TestRequireAuthAllowsPublicVersionCheck(t *testing.T) {
+	server, teardown := setupTestServerWithAuth(t, true)
+	defer teardown()
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected OCI version check to remain public, got %d", rec.Code)
 	}
 }

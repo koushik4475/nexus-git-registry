@@ -31,6 +31,7 @@ type Server struct {
 	auth        *Authenticator
 	cdcIndex    *oci.DeduplicationIndex
 	p2pPeers    []string
+	requireAuth bool
 }
 
 // Config defines Registry Server startup parameters.
@@ -63,6 +64,7 @@ func NewServer(cfg Config) (*Server, error) {
 		auth:        auth,
 		cdcIndex:    oci.NewDeduplicationIndex(),
 		p2pPeers:    cfg.P2PPeers,
+		requireAuth: cfg.RequireAuth,
 	}, nil
 }
 
@@ -108,6 +110,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 3. FastCDC Deduplication Metrics: GET /v2/_nexus/metrics
 	if path == "/v2/_nexus/metrics" {
+		if !s.authorizeRequest(w, r, "", "") {
+			return
+		}
 		s.handleMetrics(w, r)
 		return
 	}
@@ -115,6 +120,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4. Manifest Handlers
 	if matches := manifestRegex.FindStringSubmatch(path); len(matches) == 3 {
 		repo := matches[1]
+		if !s.authorizeRequest(w, r, repo, requiredAction(r.Method)) {
+			return
+		}
 		reference := matches[2]
 		s.handleManifests(w, r, repo, reference)
 		return
@@ -123,6 +131,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 5. Blob Existence / Download: GET/HEAD /v2/<repo>/blobs/<digest>
 	if matches := blobsRegex.FindStringSubmatch(path); len(matches) == 3 {
 		repo := matches[1]
+		if !s.authorizeRequest(w, r, repo, requiredAction(r.Method)) {
+			return
+		}
 		digest := matches[2]
 		s.handleBlobs(w, r, repo, digest)
 		return
@@ -131,6 +142,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 6. Blob Upload Session Initiation: POST /v2/<repo>/blobs/uploads/
 	if matches := uploadsRegex.FindStringSubmatch(path); len(matches) == 2 {
 		repo := matches[1]
+		if !s.authorizeRequest(w, r, repo, requiredAction(r.Method)) {
+			return
+		}
 		s.handleUploadStart(w, r, repo)
 		return
 	}
@@ -138,6 +152,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 7. Blob Upload Chunk / Commit: PATCH, PUT, DELETE /v2/<repo>/blobs/uploads/<uuid>
 	if matches := uploadIDRegex.FindStringSubmatch(path); len(matches) == 3 {
 		repo := matches[1]
+		if !s.authorizeRequest(w, r, repo, requiredAction(r.Method)) {
+			return
+		}
 		sessionID := matches[2]
 		s.handleUploadSession(w, r, repo, sessionID)
 		return
@@ -146,11 +163,55 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 8. Tag Listing: GET /v2/<repo>/tags/list
 	if matches := tagsRegex.FindStringSubmatch(path); len(matches) == 2 {
 		repo := matches[1]
+		if !s.authorizeRequest(w, r, repo, requiredAction(r.Method)) {
+			return
+		}
 		s.handleTagList(w, r, repo)
 		return
 	}
 
 	http.NotFound(w, r)
+}
+
+// requiredAction maps read-only registry requests to pull scope and mutations to push scope.
+func requiredAction(method string) string {
+	if method == http.MethodGet || method == http.MethodHead {
+		return "pull"
+	}
+	return "push"
+}
+
+// authorizeRequest enforces Config.RequireAuth and repository-scoped token permissions.
+// The version and token endpoints remain available for OCI discovery and token exchange.
+func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, repo, action string) bool {
+	if !s.requireAuth {
+		return true
+	}
+
+	payload, err := s.auth.AuthenticateRequest(r)
+	if err != nil {
+		s.auth.WriteAuthChallenge(w, repo, action)
+		return false
+	}
+
+	// Metrics are protected by authentication but do not belong to a repository scope.
+	if repo == "" {
+		return true
+	}
+
+	for _, grant := range payload.Access {
+		if grant.Type != "repository" || (grant.Name != repo && grant.Name != "*") {
+			continue
+		}
+		for _, allowed := range grant.Actions {
+			if allowed == "*" || allowed == action {
+				return true
+			}
+		}
+	}
+
+	s.writeError(w, http.StatusForbidden, "DENIED", "requested access to the resource is denied")
+	return false
 }
 
 func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
